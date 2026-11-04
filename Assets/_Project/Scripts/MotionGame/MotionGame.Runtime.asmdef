@@ -1,0 +1,9 @@
+{
+    "name": "MotionGame.Runtime",
+    "rootNamespace": "FamilyAdventure.Presentation",
+    "references": [
+        "Unity.ugui",
+        "Unity.InputSystem",
+        "Unity.InferenceEngine"
+    ]
+}

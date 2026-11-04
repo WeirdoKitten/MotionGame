@@ -1,0 +1,11 @@
+{
+    "name": "MotionGame.PlayMode.Tests",
+    "references": [
+        "MotionGame.Runtime",
+        "Unity.ugui",
+        "Unity.InferenceEngine"
+    ],
+    "optionalUnityReferences": [
+        "TestAssemblies"
+    ]
+}
