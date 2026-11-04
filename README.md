@@ -2,8 +2,9 @@
 
 Versi ringan dari modul **Motion Game** pada game Family Adventure, dipisah untuk penelitian tugas akhir di bidang computer vision. Repository ini hanya berisi tiga permainan kamera dan pipeline deteksi geraknya; seluruh fitur lain (onboarding, buku, Companion, Sanctuary, backend, dan sebagainya) tidak disertakan agar project lebih ringan dibuka dan dijalankan.
 
-- Sumber asli: `AIKABAYAN/FamilyAdventure`, commit `4323296`.
-- Salinan lengkap source asli (fork): [WeirdoKitten/FamilyAdventure](https://github.com/WeirdoKitten/FamilyAdventure).
+## Kredit
+
+Motion Game berasal dari game **Family Adventure** karya [AIKABAYAN](https://github.com/AIKABAYAN). Kode awal, aset, dan desain permainan diambil dari repository [AIKABAYAN/FamilyAdventure](https://github.com/AIKABAYAN/FamilyAdventure) pada commit `4323296`. Source lengkap game tersebut tetap berada di repository itu.
 
 ## Permainan
 
