@@ -17,7 +17,11 @@ namespace FamilyAdventure.Presentation
         public PoseModelKind? Model { get; private set; }
         public readonly PoseResult Pose = new PoseResult();
         public float PoseSeenAt = -10;
-        public bool PoseActive => Model.HasValue && Time.unscaledTime - PoseSeenAt < .5f;
+        public bool PoseActive => (Model.HasValue || PoseInjected) && Time.unscaledTime - PoseSeenAt < .5f;
+        // Pose results so far (found or not), so detectors take each sample once.
+        public int PoseSamples { get; private set; }
+        // True once InjectPose fed a pose (tests, recorded data); it then counts like a model.
+        public bool PoseInjected { get; private set; }
         public const float PoseInterval = .08f;
         PoseTracker tracker; float nextPose;
         public const int Width = 40, Height = 30;
@@ -83,7 +87,7 @@ namespace FamilyAdventure.Presentation
             if (tracker != null && Time.unscaledTime >= nextPose)
             {
                 nextPose = Time.unscaledTime + PoseInterval;
-                try { tracker.Run(pixels, w, h, Pose); if (Pose.found) PoseSeenAt = Time.unscaledTime; }
+                try { tracker.Run(pixels, w, h, Pose); PoseSamples++; if (Pose.found) PoseSeenAt = Time.unscaledTime; }
                 catch (System.Exception e) { Debug.LogWarning("Pose model failed, using camera motion: " + e.Message); UseModel(null); }
             }
         }
@@ -110,6 +114,13 @@ namespace FamilyAdventure.Presentation
                 position = mouse.position.ReadValue(); moving = mouse.delta.ReadValue().sqrMagnitude > .5f || mouse.leftButton.isPressed;
             }
             if (moving && Screen.width > 0) Inject(new Vector2(position.x / Screen.width, position.y / Screen.height));
+        }
+        // Feeds one pose sample as if the model had produced it (like Inject for motion). A pose with
+        // found = false is a missed frame.
+        public void InjectPose(PoseResult pose)
+        {
+            PoseInjected = true; Pose.CopyFrom(pose); PoseSamples++;
+            if (Pose.found) PoseSeenAt = Time.unscaledTime;
         }
         // Adds motion around a point (used by the pointer fallback and by tests).
         public void Inject(Vector2 uv, float amount = 1, float radius = .06f)

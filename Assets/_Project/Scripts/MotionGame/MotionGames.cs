@@ -1,16 +1,30 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.InputSystem;
 using UnityEngine.UI;
 namespace FamilyAdventure.Presentation
 {
-    // Motion missions opened from the egg house on the main menu: Catch the Star, Follow the Line and
-    // Avoid the Rock. Specs: docs/motion. All three use MotionSensor (camera frame differencing); positions
+    // Motion missions opened from the egg house on the main menu, one per basic movement: Catch the Star,
+    // Follow the Line, Avoid the Rock, Pick the Fruit, Spin the Windmill, Jump the Puddle and Find the Bird.
+    // Specs: docs/motion, docs/48-50. All use MotionSensor (pose model, or camera frame differencing); positions
     // are normalized screen coordinates (u right, v up). No failure states: misses only get a light cue.
     public sealed class MotionMissionMenu : MonoBehaviour
     {
-        public static readonly string[] Titles = { "Catch the Star", "Follow the Line", "Avoid the Rock" };
-        static readonly string[] Backgrounds = { "bg-star", "bg-line", "bg-rock" };
+        // One game per basic movement: reach, trace, shift, squat, arm circle, jump, body turn.
+        public static readonly string[] Titles =
+        {
+            "Catch the Star", "Follow the Line", "Avoid the Rock", "Pick the Fruit", "Spin the Windmill", "Jump the Puddle", "Find the Bird",
+        };
+        // The newer games have no art of their own yet and borrow the first three backgrounds.
+        static readonly string[] Backgrounds = { "bg-star", "bg-line", "bg-rock", "bg-star", "bg-line", "bg-rock", "bg-star" };
+        static readonly Func<GameObject, MotionGame>[] Games =
+        {
+            h => h.AddComponent<StarCatchGame>(), h => h.AddComponent<FollowLineGame>(), h => h.AddComponent<AvoidRockGame>(),
+            h => h.AddComponent<PickFruitGame>(), h => h.AddComponent<WindmillGame>(), h => h.AddComponent<PuddleGame>(),
+            h => h.AddComponent<BirdGame>(),
+        };
+        static readonly UiKit.Skin[] Plates = { UiKit.Skin.Gold, UiKit.Skin.Leaf, UiKit.Skin.Wood };
         Action closed;
         RectTransform root;
         public MotionGame Current { get; private set; }
@@ -23,21 +37,29 @@ namespace FamilyAdventure.Presentation
             root = MotionUi.Canvas(transform, "Mission menu", 40);
             var dim = UiKit.Panel("Dim", root, new Color(.05f, .12f, .08f, .45f)); UiKit.Anchor(dim, 0, 0, 1, 1);
             var title = UiKit.Banner(root, "Misi Gerak", 46); UiKit.Anchor((RectTransform)title.transform.parent, .33f, .79f, .67f, .93f);
+            // Up to four cards a row between the margins (.04 to .96); a shorter last row is centred.
+            int columns = Mathf.Min(4, Titles.Length), rows = (Titles.Length + columns - 1) / columns;
+            float gap = .02f, top = .76f, bottom = .17f;
+            float width = (.92f - gap * (columns - 1)) / columns, height = (top - bottom - gap * (rows - 1)) / rows;
             for (int i = 0; i < Titles.Length; i++)
             {
-                int index = i;
-                var card = UiKit.Panel("Mission " + (i + 1), root, UiKit.Paper); UiKit.Anchor(card, .06f + i * .3f, .2f, .06f + i * .3f + .27f, .74f);
+                int index = i, row = i / columns, inRow = Mathf.Min(columns, Titles.Length - row * columns);
+                float x0 = .5f - (inRow * width + (inRow - 1) * gap) / 2 + (i % columns) * (width + gap), y1 = top - row * (height + gap);
+                var card = UiKit.Panel("Mission " + (i + 1), root, UiKit.Paper); UiKit.Anchor(card, x0, y1 - height, x0 + width, y1);
                 var button = card.gameObject.AddComponent<Button>(); button.targetGraphic = card.GetComponent<Image>();
                 button.onClick.AddListener(() => Play(index));
                 var picture = MotionUi.Picture(card, "Picture", Backgrounds[i]); UiKit.Anchor(picture.rectTransform, 0, .3f, 1, 1, 10);
                 picture.preserveAspect = false; picture.raycastTarget = false;
-                var plate = UiKit.Rect("Title plate", card); UiKit.Skinned(plate.gameObject, i == 0 ? UiKit.Skin.Gold : i == 1 ? UiKit.Skin.Leaf : UiKit.Skin.Wood);
+                var plate = UiKit.Rect("Title plate", card); UiKit.Skinned(plate.gameObject, Plates[i % Plates.Length]);
                 UiKit.Anchor(plate, .06f, .05f, .94f, .26f);
                 var number = UiKit.Label(plate, Titles[i], 30, Color.white); UiKit.Anchor(number.rectTransform, 0, 0, 1, 1, 6);
                 number.alignment = TextAnchor.MiddleCenter; number.font = UiKit.Bold;
+                // Narrower cards: long titles shrink to fit on one or two lines.
+                number.resizeTextForBestFit = true; number.resizeTextMinSize = 18; number.resizeTextMaxSize = 30;
                 var o = number.gameObject.AddComponent<Outline>(); o.effectColor = new Color(.25f, .14f, .05f, .85f); o.effectDistance = new Vector2(2, -2);
-                var badge = UiKit.Disc("Number", card); badge.anchorMin = badge.anchorMax = new Vector2(.12f, .9f); badge.sizeDelta = new Vector2(64, 64);
-                var n = UiKit.Label(badge, (i + 1).ToString(), 34, Color.white); UiKit.Anchor(n.rectTransform, 0, 0, 1, 1); n.alignment = TextAnchor.MiddleCenter; n.font = UiKit.Bold;
+                float disc = rows > 1 ? 50 : 64;
+                var badge = UiKit.Disc("Number", card); badge.anchorMin = badge.anchorMax = new Vector2(.12f, .88f); badge.sizeDelta = new Vector2(disc, disc);
+                var n = UiKit.Label(badge, (i + 1).ToString(), rows > 1 ? 28 : 34, Color.white); UiKit.Anchor(n.rectTransform, 0, 0, 1, 1); n.alignment = TextAnchor.MiddleCenter; n.font = UiKit.Bold;
             }
             MotionUi.Close(root, Close);
             var model = UiKit.Button(root, ModelName(MotionSensor.PreferredModel), () => { }, false, 60, "hand"); model.name = "Model";
@@ -57,7 +79,7 @@ namespace FamilyAdventure.Presentation
             root.gameObject.SetActive(false);
             var host = new GameObject(Titles[index]);
             host.transform.SetParent(transform, false);
-            Current = index == 0 ? host.AddComponent<StarCatchGame>() : index == 1 ? (MotionGame)host.AddComponent<FollowLineGame>() : host.AddComponent<AvoidRockGame>();
+            Current = Games[index](host);
             Current.Begin(Backgrounds[index], Titles[index], () => { Current = null; root.gameObject.SetActive(true); });
         }
         public void Close() { closed?.Invoke(); Destroy(gameObject); }
@@ -121,6 +143,14 @@ namespace FamilyAdventure.Presentation
         float clock, cueTime;
         Action finished;
         protected abstract string Instruction { get; }
+        // Safety reminder shown on the calibration screen (null = none).
+        protected virtual string Safety => null;
+        // Research overlay with detector values; off by default so children never see it. F3 toggles it.
+        public static bool ShowDebug;
+        protected virtual string DebugText => null;
+        RectTransform debugBox; Text debugText;
+        public string DebugShown => debugBox != null && debugBox.gameObject.activeSelf ? debugText.text : null;
+        public string CueText => cue.text;
         public void Begin(string background, string title, Action onFinished)
         {
             finished = onFinished;
@@ -141,6 +171,11 @@ namespace FamilyAdventure.Presentation
             countdown = Text(root, "3", 150, .3f, .3f, .7f, .7f);
             MotionUi.Close(root, Quit);
             modelText = Text(root, "", 20, .7f, .01f, .99f, .05f); modelText.alignment = TextAnchor.MiddleRight;
+            debugBox = UiKit.Panel("Debug", root, new Color(0, 0, 0, .6f)); UiKit.Anchor(debugBox, .01f, .4f, .37f, .86f);
+            debugBox.GetComponent<Image>().raycastTarget = false;
+            debugText = UiKit.Label(debugBox, "", 19, Color.white); UiKit.Anchor(debugText.rectTransform, 0, 0, 1, 1, 12);
+            debugText.alignment = TextAnchor.UpperLeft; debugText.verticalOverflow = VerticalWrapMode.Overflow;
+            debugBox.gameObject.SetActive(false);
             for (int i = 0; i < 4; i++)
             {
                 limbMarks[i] = MotionUi.Picture(root, "Limb " + i, "star"); limbMarks[i].rectTransform.sizeDelta = new Vector2(46, 46);
@@ -192,6 +227,12 @@ namespace FamilyAdventure.Presentation
             Part("Right arm", z.xMax - .03f, z.yMax - .26f, z.xMax + .12f, z.yMax - .21f);
             Part("Left leg", cx - .06f, .08f, cx - .02f, z.yMin + .12f);
             Part("Right leg", cx + .02f, .08f, cx + .06f, z.yMin + .12f);
+            if (Safety != null)
+            {
+                var note = UiKit.Panel("Safety", guide, new Color(.1f, .2f, .15f, .6f)); UiKit.Anchor(note, .73f, .48f, .99f, .7f);
+                note.GetComponent<Image>().raycastTarget = false;
+                var text = UiKit.Label(note, Safety, 24, Color.white); UiKit.Anchor(text.rectTransform, 0, 0, 1, 1, 12); text.alignment = TextAnchor.MiddleCenter;
+            }
             var bar = UiKit.Panel("Still bar", guide, new Color(1, 1, 1, .6f)); UiKit.Anchor(bar, .3f, .015f, .7f, .05f);
             guideFill = UiKit.Panel("Fill", bar, new Color(.4f, .9f, .5f)).GetComponent<Image>(); UiKit.Anchor(guideFill.rectTransform, 0, 0, 0, 1, 3);
         }
@@ -203,12 +244,19 @@ namespace FamilyAdventure.Presentation
         }
         protected abstract void Setup();
         protected abstract void Tick(float dt);
+        // Every frame while the child stands still in the guide and during the countdown (for baselines).
+        protected virtual void Standing() { }
         void Update()
         {
             if (preview != null && Sensor.Preview != null && preview.texture == null) { preview.texture = Sensor.Preview; preview.color = new Color(1, 1, 1, CameraOpacity); }
             float dt = Time.unscaledDeltaTime;
             bool pose = Sensor.PoseActive;
-            modelText.text = Sensor.Model.HasValue ? Sensor.Model.Value + (pose ? $"  {Sensor.Pose.milliseconds:0} ms" : "  mencari...") : (Sensor.HasCamera ? "Gerak kamera" : "Tanpa kamera");
+            modelText.text = Sensor.Model.HasValue ? Sensor.Model.Value + (pose ? $"  {Sensor.Pose.milliseconds:0} ms" : "  mencari...")
+                : Sensor.PoseInjected ? "Pose uji" : (Sensor.HasCamera ? "Gerak kamera" : "Tanpa kamera");
+            if (Keyboard.current != null && Keyboard.current.f3Key.wasPressedThisFrame) ShowDebug = !ShowDebug;
+            string debug = ShowDebug ? DebugText : null;
+            debugBox.gameObject.SetActive(debug != null && State != Phase.Done);
+            if (debug != null) debugText.text = debug;
             for (int i = 0; i < 4; i++)
             {
                 bool show = pose && Sensor.Pose.seen[i]; limbMarks[i].gameObject.SetActive(show);
@@ -226,6 +274,7 @@ namespace FamilyAdventure.Presentation
                     Calibration = 0;
                 }
                 else if (Sensor.Total() > StillLimit) Calibration = 0; else Calibration += dt;
+                if (Present) Standing();
                 guideFill.rectTransform.anchorMax = new Vector2(Mathf.Clamp01(Calibration / CalibrationTime), 1);
                 if (Calibration >= CalibrationTime)
                 {
@@ -237,6 +286,7 @@ namespace FamilyAdventure.Presentation
             }
             if (State == Phase.Ready)
             {
+                Standing();
                 clock -= dt; countdown.text = clock > 1 ? ((int)clock).ToString() : "Mulai!";
                 if (clock <= 0) { countdown.gameObject.SetActive(false); State = Phase.Play; clock = PlayTime; Sensor.Clear(); }
                 return;

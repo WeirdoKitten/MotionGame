@@ -13,7 +13,7 @@ namespace FamilyAdventure.PlayTests
         GameObject events;
         MotionMissionMenu menu;
         // Batch mode never reaches end of frame, so overlay canvases are drawn through a temporary camera.
-        static IEnumerator Shot(string name)
+        internal static IEnumerator Shot(string name)
         {
             yield return null;
             var cameraObject = new GameObject("Shot camera"); var shotCamera = cameraObject.AddComponent<Camera>();
@@ -56,7 +56,8 @@ namespace FamilyAdventure.PlayTests
 
             menu = MotionMissionMenu.Open(null);
             yield return null; yield return Shot("motion-missions.png");
-            Assert.That(menu.GetComponentsInChildren<UnityEngine.UI.Button>().Count(b => b.name.StartsWith("Mission ")), Is.EqualTo(3));
+            Assert.That(menu.GetComponentsInChildren<UnityEngine.UI.Button>().Count(b => b.name.StartsWith("Mission ")), Is.EqualTo(MotionMissionMenu.Titles.Length));
+            Assert.That(MotionMissionMenu.Titles.Length, Is.EqualTo(7));
 
             // 1. Catch the Star: moving on the star catches it.
             menu.Play(0); var star = (StarCatchGame)menu.Current;

@@ -7,17 +7,64 @@ namespace FamilyAdventure.Presentation
 {
     public enum PoseModelKind { BlazePose, MoveNet }
 
+    // Body joints both models give (COCO order), then heels and toes (BlazePose only).
+    public enum PoseJoint
+    {
+        Nose, LeftEye, RightEye, LeftEar, RightEar, LeftShoulder, RightShoulder, LeftElbow, RightElbow, LeftWrist, RightWrist,
+        LeftHip, RightHip, LeftKnee, RightKnee, LeftAnkle, RightAnkle, LeftHeel, RightHeel, LeftToe, RightToe,
+    }
+
     // Hands and feet found by a pose model, in mirrored normalized screen space (u right, v up), like the
     // motion grid. Left/right are the child's own sides.
     public sealed class PoseResult
     {
         public const int LeftHand = 0, RightHand = 1, LeftFoot = 2, RightFoot = 3;
+        public const int JointCount = 21;
         public readonly Vector2[] limbs = new Vector2[4];
         public readonly bool[] seen = new bool[4];
         public Vector2 hips;
         public bool found;
         public float milliseconds;
-        public void Clear() { found = false; for (int i = 0; i < 4; i++) seen[i] = false; }
+        // Every joint in the same space as limbs, with visibility 0..1. Depth is BlazePose only (smaller is
+        // nearer the camera, same scale as u); MoveNet has none.
+        public readonly Vector2[] points = new Vector2[JointCount];
+        public readonly float[] visibility = new float[JointCount];
+        public readonly float[] depth = new float[JointCount];
+        public bool hasDepth;
+        // Camera picture width / height, to compare horizontal with vertical distances.
+        public float aspect = 4f / 3;
+        // BlazePose: pose presence 0..1 from the landmark model, and whether the crop came from the previous
+        // frame's landmarks (tracking) instead of the person detector.
+        public float presence;
+        public bool tracked;
+        public Vector2 this[PoseJoint joint] => points[(int)joint];
+        public float Visibility(PoseJoint joint) => found ? visibility[(int)joint] : 0;
+        public bool Visible(PoseJoint joint, float minimum = .5f) => Visibility(joint) >= minimum;
+        public void Set(PoseJoint joint, Vector2 point, float seenAmount = 1, float z = 0)
+        {
+            points[(int)joint] = point; visibility[(int)joint] = seenAmount; depth[(int)joint] = z;
+        }
+        public void Clear()
+        {
+            found = false; hasDepth = false; tracked = false; presence = 0;
+            for (int i = 0; i < 4; i++) seen[i] = false;
+            Array.Clear(visibility, 0, JointCount);
+        }
+        public void CopyFrom(PoseResult other)
+        {
+            Array.Copy(other.limbs, limbs, 4); Array.Copy(other.seen, seen, 4);
+            Array.Copy(other.points, points, JointCount); Array.Copy(other.visibility, visibility, JointCount); Array.Copy(other.depth, depth, JointCount);
+            hips = other.hips; found = other.found; milliseconds = other.milliseconds; hasDepth = other.hasDepth; aspect = other.aspect;
+            presence = other.presence; tracked = other.tracked;
+        }
+        // Hands, feet and hips for the first three games from wrists, ankles and hips (for poses made by hand,
+        // such as in tests; the trackers fill these themselves).
+        public void DeriveLimbs()
+        {
+            var ends = new[] { PoseJoint.LeftWrist, PoseJoint.RightWrist, PoseJoint.LeftAnkle, PoseJoint.RightAnkle };
+            for (int i = 0; i < 4; i++) { limbs[i] = this[ends[i]]; seen[i] = Visible(ends[i]); }
+            hips = (this[PoseJoint.LeftHip] + this[PoseJoint.RightHip]) * .5f;
+        }
     }
 
     // Runs a pose model (Unity Inference Engine) on a camera frame. Frames are prepared on the CPU (the
@@ -29,6 +76,8 @@ namespace FamilyAdventure.Presentation
     {
         const string Folder = "Motion/Pose/";
         public abstract PoseModelKind Kind { get; }
+        // BlazePose follows the body from frame to frame (see BlazePoseTracker); off = person detector every frame.
+        public static bool TrackBetweenFrames = true;
         public static PoseTracker Create(PoseModelKind kind) => kind == PoseModelKind.MoveNet ? new MoveNetTracker() : new BlazePoseTracker();
         public abstract void Run(Color32[] pixels, int width, int height, PoseResult result);
         public abstract void Dispose();
@@ -78,16 +127,23 @@ namespace FamilyAdventure.Presentation
         const int DetectorSize = 224, LandmarkSize = 256, Anchors = 2254;
         // Landmark indices (MediaPipe pose): index fingers, foot tips and hips.
         const int LeftIndex = 19, RightIndex = 20, LeftFootTip = 31, RightFootTip = 32, LeftHip = 23, RightHip = 24;
+        // MediaPipe landmark for each PoseJoint (nose, eyes, ears, shoulders ... heels, foot tips).
+        static readonly int[] Joints = { 0, 2, 5, 7, 8, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32 };
+        // Auxiliary landmarks (39 in all): body centre and the point that sets the crop size and tilt.
+        const int BodyCentre = 33, BodyTop = 34;
         readonly Worker detector, landmarker;
         readonly float[,] anchors = new float[Anchors, 2];
         readonly float[] detectorInput = new float[DetectorSize * DetectorSize * 3], landmarkInput = new float[LandmarkSize * LandmarkSize * 3];
-        readonly string landmarkOutput;
+        readonly string landmarkOutput, flagOutput;
         public override PoseModelKind Kind => PoseModelKind.BlazePose;
         public BlazePoseTracker()
         {
             detector = new Worker(Load("pose_detection"), BackendType.CPU);
             var landmarks = Load("pose_landmarks_lite");
             landmarkOutput = landmarks.outputs.Exists(o => o.name == "Identity") ? "Identity" : landmarks.outputs[0].name;
+            // Second output: pose flag (is a body in the crop).
+            flagOutput = landmarks.outputs.Exists(o => o.name == "Identity_1") ? "Identity_1" : landmarks.outputs.Count > 1 ? landmarks.outputs[1].name : null;
+            UnityEngine.Debug.Log("BlazePose landmark outputs: " + string.Join(", ", landmarks.outputs.ConvertAll(o => o.name)));
             landmarker = new Worker(landmarks, BackendType.CPU);
             var lines = Text("anchors").text.Split('\n');
             for (int i = 0; i < Anchors; i++)
@@ -96,42 +152,81 @@ namespace FamilyAdventure.Presentation
                 anchors[i, 0] = float.Parse(v[0], CultureInfo.InvariantCulture); anchors[i, 1] = float.Parse(v[1], CultureInfo.InvariantCulture);
             }
         }
+        // MediaPipe-style tracking: after a good frame the next crop comes from the landmarks' own body circle
+        // (auxiliary landmarks 33 = hip centre, 34 = size and tilt point), so the face-based person detector
+        // only runs when the body was lost. A child who turns away or whose head leaves the picture (jumping)
+        // stays tracked; the landmark model's pose flag says when the body is really gone.
+        bool tracking; Vector2 trackHip, trackTop;
+        const float PresenceMin = .5f;
         public override void Run(Color32[] pixels, int width, int height, PoseResult result)
         {
             var clock = Stopwatch.StartNew(); result.Clear();
+            bool done = false;
+            if (tracking && TrackBetweenFrames) done = result.tracked = Landmarks(pixels, width, height, trackHip, trackTop, result);
+            if (!done && Detect(pixels, width, height, out var hip, out var top)) done = Landmarks(pixels, width, height, hip, top, result);
+            tracking = done;
+            result.aspect = (float)width / height;
+            result.milliseconds = (float)clock.Elapsed.TotalMilliseconds;
+        }
+        // Person detector: two keypoints (hip centre, above the head) give the body centre, size and tilt.
+        bool Detect(Color32[] pixels, int width, int height, out Vector2 hip, out Vector2 top)
+        {
             var m = Affine.Square(width, height, DetectorSize);
             Sample(pixels, width, height, detectorInput, DetectorSize, m, 1 / 255f);
             using (var input = new Tensor<float>(new TensorShape(1, DetectorSize, DetectorSize, 3), detectorInput))
                 detector.Schedule(input);
             using var boxes = (detector.PeekOutput(0) as Tensor<float>).ReadbackAndClone();
             using var scores = (detector.PeekOutput(1) as Tensor<float>).ReadbackAndClone();
-            int best = 0; float top = float.MinValue;
-            for (int i = 0; i < Anchors; i++) if (scores[i] > top) { top = scores[i]; best = i; }
-            float score = 1 / (1 + Mathf.Exp(-Mathf.Clamp(top, -100, 100)));
-            if (score >= .5f)
+            int best = 0; float topScore = float.MinValue;
+            for (int i = 0; i < Anchors; i++) if (scores[i] > topScore) { topScore = scores[i]; best = i; }
+            float score = 1 / (1 + Mathf.Exp(-Mathf.Clamp(topScore, -100, 100)));
+            hip = top = default;
+            if (score < .5f) return false;
+            int row = best * boxes.shape[2];
+            float ax = DetectorSize * anchors[best, 0], ay = DetectorSize * anchors[best, 1];
+            hip = m.Map(ax + boxes[row + 4], ay + boxes[row + 5]);
+            top = m.Map(ax + boxes[row + 6], ay + boxes[row + 7]);
+            return true;
+        }
+        // Landmarks inside the body circle given by hip and top (image pixels). False when the pose flag says
+        // no body is there.
+        bool Landmarks(Color32[] pixels, int width, int height, Vector2 hip, Vector2 top, PoseResult result)
+        {
+            var delta = top - hip; float radius = 1.25f * delta.magnitude, theta = Mathf.Atan2(delta.y, delta.x);
+            if (radius < 4) return false;
+            float s = radius / (.5f * LandmarkSize), rot = .5f * Mathf.PI - theta, cos = Mathf.Cos(rot), sin = Mathf.Sin(rot);
+            // M2 = T(hip) * S(s,-s) * R(rot) * T(-half)
+            float h = .5f * LandmarkSize;
+            var m2 = new Affine { a = s * cos, b = -s * sin, d = -s * sin, e = -s * cos };
+            m2.c = hip.x - (m2.a * h + m2.b * h); m2.f = hip.y - (m2.d * h + m2.e * h);
+            Sample(pixels, width, height, landmarkInput, LandmarkSize, m2, 1 / 255f);
+            using (var input = new Tensor<float>(new TensorShape(1, LandmarkSize, LandmarkSize, 3), landmarkInput))
+                landmarker.Schedule(input);
+            result.presence = 1;
+            if (flagOutput != null)
             {
-                // Two detector keypoints (hip centre, above the head) give the body centre, size and tilt.
-                int row = best * boxes.shape[2];
-                float ax = DetectorSize * anchors[best, 0], ay = DetectorSize * anchors[best, 1];
-                var hip = m.Map(ax + boxes[row + 4], ay + boxes[row + 5]);
-                var top2 = m.Map(ax + boxes[row + 6], ay + boxes[row + 7]);
-                var delta = top2 - hip; float radius = 1.25f * delta.magnitude, theta = Mathf.Atan2(delta.y, delta.x);
-                float s = radius / (.5f * LandmarkSize), rot = .5f * Mathf.PI - theta, cos = Mathf.Cos(rot), sin = Mathf.Sin(rot);
-                // M2 = T(hip) * S(s,-s) * R(rot) * T(-half)
-                float h = .5f * LandmarkSize;
-                var m2 = new Affine { a = s * cos, b = -s * sin, d = -s * sin, e = -s * cos };
-                m2.c = hip.x - (m2.a * h + m2.b * h); m2.f = hip.y - (m2.d * h + m2.e * h);
-                Sample(pixels, width, height, landmarkInput, LandmarkSize, m2, 1 / 255f);
-                using (var input = new Tensor<float>(new TensorShape(1, LandmarkSize, LandmarkSize, 3), landmarkInput))
-                    landmarker.Schedule(input);
-                using var points = (landmarker.PeekOutput(landmarkOutput) as Tensor<float>).ReadbackAndClone();
-                Vector2 Point(int k) => Screen(m2.Map(points[5 * k], points[5 * k + 1]), width, height);
-                bool Visible(int k) => points[5 * k + 3] > .5f && points[5 * k + 4] > .5f;
-                int[] limbs = { LeftIndex, RightIndex, LeftFootTip, RightFootTip };
-                for (int i = 0; i < 4; i++) { result.limbs[i] = Point(limbs[i]); result.seen[i] = Visible(limbs[i]); }
-                result.hips = (Point(LeftHip) + Point(RightHip)) * .5f; result.found = true;
+                using var flag = (landmarker.PeekOutput(flagOutput) as Tensor<float>).ReadbackAndClone();
+                result.presence = flag[0];
             }
-            result.milliseconds = (float)clock.Elapsed.TotalMilliseconds;
+            if (result.presence < PresenceMin) return false;
+            using var points = (landmarker.PeekOutput(landmarkOutput) as Tensor<float>).ReadbackAndClone();
+            Vector2 Point(int k) => Screen(m2.Map(points[5 * k], points[5 * k + 1]), width, height);
+            bool Visible(int k) => points[5 * k + 3] > .5f && points[5 * k + 4] > .5f;
+            int[] limbs = { LeftIndex, RightIndex, LeftFootTip, RightFootTip };
+            for (int i = 0; i < 4; i++) { result.limbs[i] = Point(limbs[i]); result.seen[i] = Visible(limbs[i]); }
+            result.hips = (Point(LeftHip) + Point(RightHip)) * .5f; result.found = true;
+            // Visibility and presence are logits (MediaPipe applies a sigmoid); z is in crop pixels like x.
+            for (int j = 0; j < PoseResult.JointCount; j++)
+            {
+                int k = Joints[j];
+                float seenLogit = Mathf.Min(points[5 * k + 3], points[5 * k + 4]);
+                result.Set((PoseJoint)j, Point(k), 1 / (1 + Mathf.Exp(-Mathf.Clamp(seenLogit, -30, 30))), points[5 * k + 2] * s / width);
+            }
+            result.hasDepth = true;
+            // Body circle for the next frame, from the auxiliary landmarks (image pixels).
+            trackHip = m2.Map(points[5 * BodyCentre], points[5 * BodyCentre + 1]);
+            trackTop = m2.Map(points[5 * BodyTop], points[5 * BodyTop + 1]);
+            return true;
         }
         public override void Dispose() { detector.Dispose(); landmarker.Dispose(); }
     }
@@ -171,6 +266,9 @@ namespace FamilyAdventure.Presentation
             for (int i = 0; i < 4; i++) { result.limbs[i] = Point(limbs[i]); result.seen[i] = Visible(limbs[i]); }
             result.found = Visible(LeftHip) || Visible(RightHip) || result.seen[0] || result.seen[1];
             result.hips = (Point(LeftHip) + Point(RightHip)) * .5f;
+            // COCO order is the PoseJoint order; scores are already 0..1. No heels, toes or depth.
+            for (int j = 0; j < 17; j++) result.Set((PoseJoint)j, Point(j), output[j * 3 + 2]);
+            result.aspect = (float)width / height;
             result.milliseconds = (float)clock.Elapsed.TotalMilliseconds;
         }
         public override void Dispose() { worker.Dispose(); }

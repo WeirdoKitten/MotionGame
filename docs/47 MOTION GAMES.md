@@ -3,8 +3,8 @@
 Spesifikasi sumber: `docs/motion/` (GDD Star Catch, Follow the Line, Avoid the Rock).
 
 ## Alur
-- Menu utama: ketuk **rumah telur** di latar → panel **Misi Gerak** dengan 3 kartu:
-  1. Catch the Star, 2. Follow the Line, 3. Avoid the Rock.
+- Menu utama: ketuk **rumah telur** di latar → panel **Misi Gerak** dengan 4 kartu:
+  1. Catch the Star, 2. Follow the Line, 3. Avoid the Rock, 4. Pick the Fruit.
 - Tiap game: hitung mundur 3-2-1 → main 60 detik → layar "Hebat!" (jumlah bintang, Main lagi / Misi lain).
   Tidak ada game over; meleset hanya diberi isyarat ringan ("Coba lagi!", "Awas!").
 
@@ -61,3 +61,23 @@ Spesifikasi sumber: `docs/motion/` (GDD Star Catch, Follow the Line, Avoid the R
   (~8 ms/frame) tetapi pada pose terbalik titik-titiknya bertumpuk dengan skor rendah dan tangan tidak terdeteksi.
   Rekomendasi: **BlazePose** sebagai bawaan; MoveNet untuk perangkat lemah. Perlu diuji dengan anak berdiri di depan
   webcam sungguhan.
+
+## Pick the Fruit dan detektor gerak dasar (update)
+
+- Permainan ke-4 melatih satu gerakan dasar: **jongkok**. Alasan pemilihan: `docs/48 GERAKAN DASAR BARU.md`. Detail detektor, ambang batas, keterbatasan, dan langkah uji kamera: `docs/49 DETEKTOR JONGKOK.md`.
+- `PoseResult` sekarang juga menyimpan 21 titik (`PoseJoint`: wajah, bahu, siku, pergelangan, pinggul, lutut, pergelangan kaki, tumit, ujung kaki) dengan visibility 0..1 dan z (BlazePose). Data lama (`limbs`, `seen`, `hips`) tidak berubah, jadi tiga game pertama tetap sama.
+- Detektor dipisah dari tampilan: `SquatDetector` mengikuti `IBasicMoveDetector` (arah, besar gerakan, jumlah, progres, kepercayaan, `MoveRecord`), agar bisa dirangkai menjadi gerakan advance nanti.
+- `MotionGame` mendapat tiga hook opsional: `Standing()` (dipanggil saat anak diam di panduan dan saat hitung mundur, untuk baseline), `Safety` (catatan keamanan di layar kalibrasi), dan `DebugText` (overlay debug, F3, bawaan mati).
+- `MotionSensor.InjectPose` memasukkan pose buatan (untuk test), mirip `Inject` untuk gerak. `PoseSamples` menghitung hasil pose baru.
+- Kartu menu dibagi rata untuk 4 kartu; judul mengecil otomatis bila perlu.
+- Aset khusus belum ada: memakai `bg-star` dan sprite `star` berwarna oranye sebagai buah. Daftar aset yang dibutuhkan ada di `docs/49`.
+- Tes: `SquatDetectorTests`, `PickFruitPlayTests` (pose buatan dari `FakePose`).
+
+## Spin the Windmill, Jump the Puddle, Find the Bird (update)
+
+- Tiga gerakan dasar lagi, satu game per gerakan: putar lengan (`ArmCircleDetector`, kartu 5), lompat (`JumpDetector`, kartu 6), memutar badan (`TurnDetector`, kartu 7). Detail: `docs/50 DETEKTOR LENGAN LOMPAT PUTAR.md`.
+- `PoseMoveGame`: class dasar game berbasis satu detektor (baseline saat diam, satu sampel pose sekali, cadangan tanpa pose).
+- BlazePose melacak badan antar frame dari landmark bantu 33/34 dan pose flag; detektor orang (berbasis wajah) hanya jalan saat badan hilang. ±21 ms per frame di laptop uji (sebelumnya ±45 ms).
+- Menu 7 kartu: grid 4 + 3.
+- Keamanan: lompat 3 per set lalu istirahat 5 s; putaran penuh paling banyak 2 per ronde, bergantian arah, lalu istirahat 5 s; putar lengan ganti lengan setiap 3 lingkaran.
+- Tes: `MoveDetectorTests`, `NewGamesPlayTests`.
