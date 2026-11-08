@@ -12,10 +12,11 @@ namespace FamilyAdventure.Presentation
         public const string SceneName = "MotionGame";
 
         // Registered before the first scene loads, so the first scene and any later load of the
-        // MotionGame scene both open the menu.
+        // MotionGame scene both open the menu. Pressing Play in the Unity 6 editor reports the first scene
+        // with an internal mode value (not Single), so only additive loads are skipped.
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         static void Register() { SceneManager.sceneLoaded -= Loaded; SceneManager.sceneLoaded += Loaded; }
-        static void Loaded(Scene scene, LoadSceneMode mode) { if (scene.name == SceneName && mode == LoadSceneMode.Single) Launch(); }
+        static void Loaded(Scene scene, LoadSceneMode mode) { if (scene.name == SceneName && mode != LoadSceneMode.Additive) Launch(); }
 
         static void Launch()
         {
