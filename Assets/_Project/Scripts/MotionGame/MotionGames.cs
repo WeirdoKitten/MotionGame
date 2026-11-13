@@ -4,13 +4,20 @@ using UnityEngine;
 using UnityEngine.UI;
 namespace FamilyAdventure.Presentation
 {
-    // Motion missions opened from the egg house on the main menu: Catch the Star, Follow the Line and
-    // Avoid the Rock. Specs: docs/motion. All three use MotionSensor (camera frame differencing); positions
-    // are normalized screen coordinates (u right, v up). No failure states: misses only get a light cue.
+    // Motion missions opened from the egg house on the main menu: Catch the Star, Follow the Line, Avoid the
+    // Rock and Ikuti Senam (a whole senam converted from a video, docs/52). Specs: docs/motion. All use
+    // MotionSensor (pose model, or camera frame differencing); positions are normalized screen coordinates
+    // (u right, v up). No failure states: misses only get a light cue.
     public sealed class MotionMissionMenu : MonoBehaviour
     {
-        public static readonly string[] Titles = { "Catch the Star", "Follow the Line", "Avoid the Rock" };
-        static readonly string[] Backgrounds = { "bg-star", "bg-line", "bg-rock" };
+        public static readonly string[] Titles = { "Catch the Star", "Follow the Line", "Avoid the Rock", "Ikuti Senam" };
+        // Ikuti Senam has no art of its own yet and borrows the star background.
+        static readonly string[] Backgrounds = { "bg-star", "bg-line", "bg-rock", "bg-star" };
+        static readonly Func<GameObject, MotionGame>[] Games =
+        {
+            h => h.AddComponent<StarCatchGame>(), h => h.AddComponent<FollowLineGame>(), h => h.AddComponent<AvoidRockGame>(), h => h.AddComponent<SenamGame>(),
+        };
+        static readonly UiKit.Skin[] Plates = { UiKit.Skin.Gold, UiKit.Skin.Leaf, UiKit.Skin.Wood, UiKit.Skin.Leaf };
         Action closed;
         RectTransform root;
         public MotionGame Current { get; private set; }
@@ -23,18 +30,23 @@ namespace FamilyAdventure.Presentation
             root = MotionUi.Canvas(transform, "Mission menu", 40);
             var dim = UiKit.Panel("Dim", root, new Color(.05f, .12f, .08f, .45f)); UiKit.Anchor(dim, 0, 0, 1, 1);
             var title = UiKit.Banner(root, "Misi Gerak", 46); UiKit.Anchor((RectTransform)title.transform.parent, .33f, .79f, .67f, .93f);
+            // All cards in one row between the margins.
+            float gap = .025f, width = (.92f - gap * (Titles.Length - 1)) / Titles.Length;
             for (int i = 0; i < Titles.Length; i++)
             {
                 int index = i;
-                var card = UiKit.Panel("Mission " + (i + 1), root, UiKit.Paper); UiKit.Anchor(card, .06f + i * .3f, .2f, .06f + i * .3f + .27f, .74f);
+                float x0 = .04f + i * (width + gap);
+                var card = UiKit.Panel("Mission " + (i + 1), root, UiKit.Paper); UiKit.Anchor(card, x0, .2f, x0 + width, .74f);
                 var button = card.gameObject.AddComponent<Button>(); button.targetGraphic = card.GetComponent<Image>();
                 button.onClick.AddListener(() => Play(index));
                 var picture = MotionUi.Picture(card, "Picture", Backgrounds[i]); UiKit.Anchor(picture.rectTransform, 0, .3f, 1, 1, 10);
                 picture.preserveAspect = false; picture.raycastTarget = false;
-                var plate = UiKit.Rect("Title plate", card); UiKit.Skinned(plate.gameObject, i == 0 ? UiKit.Skin.Gold : i == 1 ? UiKit.Skin.Leaf : UiKit.Skin.Wood);
+                var plate = UiKit.Rect("Title plate", card); UiKit.Skinned(plate.gameObject, Plates[i % Plates.Length]);
                 UiKit.Anchor(plate, .06f, .05f, .94f, .26f);
                 var number = UiKit.Label(plate, Titles[i], 30, Color.white); UiKit.Anchor(number.rectTransform, 0, 0, 1, 1, 6);
                 number.alignment = TextAnchor.MiddleCenter; number.font = UiKit.Bold;
+                // Narrower cards: long titles shrink to fit.
+                number.resizeTextForBestFit = true; number.resizeTextMinSize = 18; number.resizeTextMaxSize = 30;
                 var o = number.gameObject.AddComponent<Outline>(); o.effectColor = new Color(.25f, .14f, .05f, .85f); o.effectDistance = new Vector2(2, -2);
                 var badge = UiKit.Disc("Number", card); badge.anchorMin = badge.anchorMax = new Vector2(.12f, .9f); badge.sizeDelta = new Vector2(64, 64);
                 var n = UiKit.Label(badge, (i + 1).ToString(), 34, Color.white); UiKit.Anchor(n.rectTransform, 0, 0, 1, 1); n.alignment = TextAnchor.MiddleCenter; n.font = UiKit.Bold;
@@ -57,7 +69,7 @@ namespace FamilyAdventure.Presentation
             root.gameObject.SetActive(false);
             var host = new GameObject(Titles[index]);
             host.transform.SetParent(transform, false);
-            Current = index == 0 ? host.AddComponent<StarCatchGame>() : index == 1 ? (MotionGame)host.AddComponent<FollowLineGame>() : host.AddComponent<AvoidRockGame>();
+            Current = Games[index](host);
             Current.Begin(Backgrounds[index], Titles[index], () => { Current = null; root.gameObject.SetActive(true); });
         }
         public void Close() { closed?.Invoke(); Destroy(gameObject); }
@@ -203,6 +215,10 @@ namespace FamilyAdventure.Presentation
         }
         protected abstract void Setup();
         protected abstract void Tick(float dt);
+        // Every frame while the child stands still in the guide and during the countdown (for baselines).
+        protected virtual void Standing() { }
+        // Length of one round in seconds (a senam lasts as long as its video).
+        protected virtual float RoundTime => PlayTime;
         void Update()
         {
             if (preview != null && Sensor.Preview != null && preview.texture == null) { preview.texture = Sensor.Preview; preview.color = new Color(1, 1, 1, CameraOpacity); }
@@ -226,6 +242,7 @@ namespace FamilyAdventure.Presentation
                     Calibration = 0;
                 }
                 else if (Sensor.Total() > StillLimit) Calibration = 0; else Calibration += dt;
+                if (Present) Standing();
                 guideFill.rectTransform.anchorMax = new Vector2(Mathf.Clamp01(Calibration / CalibrationTime), 1);
                 if (Calibration >= CalibrationTime)
                 {
@@ -237,12 +254,13 @@ namespace FamilyAdventure.Presentation
             }
             if (State == Phase.Ready)
             {
+                Standing();
                 clock -= dt; countdown.text = clock > 1 ? ((int)clock).ToString() : "Mulai!";
-                if (clock <= 0) { countdown.gameObject.SetActive(false); State = Phase.Play; clock = PlayTime; Sensor.Clear(); }
+                if (clock <= 0) { countdown.gameObject.SetActive(false); State = Phase.Play; clock = RoundTime; Sensor.Clear(); }
                 return;
             }
             if (State != Phase.Play) return;
-            clock -= dt; timerFill.rectTransform.anchorMax = new Vector2(Mathf.Clamp01(clock / PlayTime), 1);
+            clock -= dt; timerFill.rectTransform.anchorMax = new Vector2(Mathf.Clamp01(clock / RoundTime), 1);
             Tick(dt);
             scoreText.text = Score.ToString();
             if (clock <= 0) Finish();
@@ -282,45 +300,81 @@ namespace FamilyAdventure.Presentation
         }
     }
 
-    // 1. Catch the Star: a star appears and grows as it comes close; move a hand onto it to catch it.
+    // 1. Catch the Star: a hand or foot picture shows where (and how) to reach; putting a hand or foot on
+    // it turns it into a star that flies to the star count. The pictures are mirrored like the camera view:
+    // targets on the right are for the right hand. The hand shape is only a cue for now: the pose models do
+    // not see fingers yet, so only the position is checked (docs/51).
     public sealed class StarCatchGame : MotionGame
     {
-        static readonly Vector2[] Pattern =
+        static readonly (Vector2 point, HandShape shape)[] Pattern =
         {
             // Hands: out to the sides and up; feet: low beside the legs. Never on the body.
-            new Vector2(.28f, .6f), new Vector2(.72f, .6f), new Vector2(.25f, .78f), new Vector2(.75f, .78f), new Vector2(.36f, .14f),
-            new Vector2(.64f, .14f), new Vector2(.2f, .45f), new Vector2(.8f, .45f), new Vector2(.34f, .93f), new Vector2(.66f, .93f),
+            (new Vector2(.28f, .6f), HandShape.Open), (new Vector2(.72f, .6f), HandShape.Open),
+            (new Vector2(.25f, .78f), HandShape.Open), (new Vector2(.75f, .78f), HandShape.Open),
+            (new Vector2(.36f, .14f), HandShape.Open), (new Vector2(.64f, .14f), HandShape.Open),
+            (new Vector2(.2f, .45f), HandShape.Side), (new Vector2(.8f, .45f), HandShape.Side),
+            (new Vector2(.34f, .93f), HandShape.Fist), (new Vector2(.66f, .93f), HandShape.Fist),
         };
-        protected override string Instruction => "Tangkap bintangnya dengan tangan atau kakimu!";
+        // Targets below this height are for the feet.
+        public const float FootLine = .3f;
+        static readonly Color HandColor = new Color(1, .86f, .3f), FootColor = new Color(.45f, .8f, 1);
+        protected override string Instruction => "Taruh tangan atau kakimu di gambarnya, jadi bintang!";
+        // The current target picture (named Star because catching it gives a star).
         public Image Star { get; private set; }
         public Vector2 StarPoint { get; private set; }
+        public HandShape Shape { get; private set; }
+        public bool ForFeet => StarPoint.y < FootLine;
+        public bool RightSide => StarPoint.x > .5f;
         float age, wait;
         int next;
         protected override void Setup() { next = 0; wait = .3f; Star = null; }
+        string ShapeCue => ForFeet ? "Pakai kaki!" : Shape == HandShape.Fist ? "Kepalkan tangan!" : Shape == HandShape.Side ? "Tangan menyamping!" : "Buka tanganmu!";
         protected override void Tick(float dt)
         {
             if (Star == null)
             {
                 if ((wait -= dt) > 0) return;
-                StarPoint = Pattern[next % Pattern.Length] + (next >= Pattern.Length ? new Vector2(UnityEngine.Random.Range(-.04f, .04f), UnityEngine.Random.Range(-.03f, .03f)) : Vector2.zero);
-                next++; age = 0;
-                Star = Sprite("Star", "star", StarPoint, .05f);
+                var step = Pattern[next % Pattern.Length];
+                StarPoint = step.point + (next >= Pattern.Length ? new Vector2(UnityEngine.Random.Range(-.04f, .04f), UnityEngine.Random.Range(-.03f, .03f)) : Vector2.zero);
+                Shape = step.shape; next++; age = 0;
+                Star = Sprite("Target", "star", StarPoint, .06f);
+                Star.sprite = ForFeet ? LimbIcons.Foot() : LimbIcons.Hand(Shape);
+                Cue(ShapeCue, 1.5f);
                 return;
             }
             age += dt;
-            // Approach: the star grows, then waits to be caught.
-            float grow = Mathf.Clamp01(age / 1.2f), size = Mathf.Lerp(.05f, .2f, grow);
-            Place(Star.rectTransform, StarPoint + new Vector2(0, Mathf.Sin(age * 3) * .01f), size);
-            Star.rectTransform.localRotation = Quaternion.Euler(0, 0, Mathf.Sin(age * 2) * 10);
-            if (grow >= .6f && Sensor.Energy(StarPoint, .07f) > .35f)
+            // The picture grows in, then waits; it glows while a hand (or foot) is close.
+            float grow = Mathf.Clamp01(age / 1.2f), energy = Sensor.LimbEnergy(StarPoint, .07f, ForFeet);
+            bool near = energy > .15f;
+            var r = Star.rectTransform;
+            Place(r, StarPoint + new Vector2(0, Mathf.Sin(age * 3) * .008f), Mathf.Lerp(.06f, .19f, grow) * (near ? 1.12f : 1));
+            r.localScale = new Vector3(RightSide ? 1 : -1, 1, 1);
+            r.localRotation = Quaternion.Euler(0, 0, Tilt());
+            var color = ForFeet ? FootColor : HandColor; color.a = near ? 1 : .6f + .15f * Mathf.Sin(age * 4); Star.color = color;
+            if (grow >= .6f && energy > .35f)
             {
-                Score++; Burst(StarPoint, new Color(1, .9f, .4f)); Cue("Hebat!", .8f);
+                Score++; Burst(StarPoint, new Color(1, .9f, .4f)); Cue("Hebat!", .8f); FlyToScore(StarPoint);
                 Destroy(Star.gameObject); Star = null; wait = .5f;
             }
             else if (age > 6)
             {
                 Cue("Coba lagi!", .8f); Destroy(Star.gameObject); Star = null; wait = .5f;
             }
+        }
+        // Fingers lean away from the shoulder, so a hand out to the side lies sideways. Feet stay upright.
+        float Tilt()
+        {
+            if (ForFeet) return 0;
+            var shoulder = new Vector2(RightSide ? BodyZone.xMax : BodyZone.xMin, BodyZone.yMax - .23f);
+            var d = StarPoint - shoulder; d.x *= 1.6f; // the screen is wider than it is tall
+            float angle = Mathf.DeltaAngle(0, Mathf.Atan2(d.y, d.x) * Mathf.Rad2Deg - 90);
+            return Mathf.Clamp(angle * .6f, -70, 70);
+        }
+        // The caught picture becomes a star flying to the star count (top left).
+        void FlyToScore(Vector2 from)
+        {
+            var star = Sprite("Caught star", "star", from, .12f);
+            star.gameObject.AddComponent<MotionSpark>().velocity = Vector2.Scale(new Vector2(.05f, .93f) - from, area.rect.size) / .6f;
         }
     }
 

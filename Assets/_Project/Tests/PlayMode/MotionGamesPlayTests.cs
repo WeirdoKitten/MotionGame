@@ -6,6 +6,7 @@ using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.TestTools;
+using UnityEngine.UI;
 namespace FamilyAdventure.PlayTests
 {
     public sealed class MotionGamesPlayTests
@@ -13,7 +14,7 @@ namespace FamilyAdventure.PlayTests
         GameObject events;
         MotionMissionMenu menu;
         // Batch mode never reaches end of frame, so overlay canvases are drawn through a temporary camera.
-        static IEnumerator Shot(string name)
+        internal static IEnumerator Shot(string name)
         {
             yield return null;
             var cameraObject = new GameObject("Shot camera"); var shotCamera = cameraObject.AddComponent<Camera>();
@@ -56,7 +57,7 @@ namespace FamilyAdventure.PlayTests
 
             menu = MotionMissionMenu.Open(null);
             yield return null; yield return Shot("motion-missions.png");
-            Assert.That(menu.GetComponentsInChildren<UnityEngine.UI.Button>().Count(b => b.name.StartsWith("Mission ")), Is.EqualTo(3));
+            Assert.That(menu.GetComponentsInChildren<UnityEngine.UI.Button>().Count(b => b.name.StartsWith("Mission ")), Is.EqualTo(MotionMissionMenu.Titles.Length));
 
             // 1. Catch the Star: moving on the star catches it.
             menu.Play(0); var star = (StarCatchGame)menu.Current;
@@ -66,6 +67,9 @@ namespace FamilyAdventure.PlayTests
             // Body movement does not catch anything.
             for (float t = 0; t < 2; t += Time.unscaledDeltaTime) { star.Sensor.Inject(MotionGame.BodyZone.center, 1, .05f); yield return null; }
             Assert.That(star.Score, Is.Zero); Assert.That(MotionGame.BodyZone.Contains(star.StarPoint), Is.False);
+            // The first target is an open left hand: a hand picture, flipped because it is on the left side.
+            Assert.That(star.Star, Is.Not.Null); Assert.That(star.ForFeet, Is.False); Assert.That(star.Shape, Is.EqualTo(HandShape.Open));
+            Assert.That(star.Star.sprite, Is.SameAs(LimbIcons.Hand(HandShape.Open))); Assert.That(star.Star.rectTransform.localScale.x, Is.EqualTo(-1));
             for (float t = 0; t < 4 && star.Score == 0; t += Time.unscaledDeltaTime)
             {
                 if (star.Star != null) star.Sensor.Inject(star.StarPoint);
@@ -115,6 +119,28 @@ namespace FamilyAdventure.PlayTests
             Assert.That(menu.Current, Is.Null);
             menu.Close(); yield return null;
         }
-        [UnityTearDown] public IEnumerator Clean() { MotionSensor.AllowCamera = true; if (menu != null) Object.Destroy(menu.gameObject); Object.Destroy(events); yield return null; }
+        // The placeholder hand and foot pictures, right side and flipped for the left, for checking the drawing.
+        [UnityTest] public IEnumerator HandAndFootPictures()
+        {
+            var sprites = new[] { LimbIcons.Hand(HandShape.Open), LimbIcons.Hand(HandShape.Fist), LimbIcons.Hand(HandShape.Side), LimbIcons.Foot() };
+            Assert.That(sprites, Has.None.Null); Assert.That(sprites.Distinct().Count(), Is.EqualTo(4));
+            var root = new GameObject("Pictures", typeof(RectTransform), typeof(Canvas), typeof(CanvasScaler));
+            root.GetComponent<Canvas>().renderMode = RenderMode.ScreenSpaceOverlay;
+            var scaler = root.GetComponent<CanvasScaler>(); scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize; scaler.referenceResolution = new Vector2(1440, 900);
+            var back = new GameObject("Back", typeof(RectTransform), typeof(Image)); back.transform.SetParent(root.transform, false);
+            var backRect = (RectTransform)back.transform; backRect.anchorMin = Vector2.zero; backRect.anchorMax = Vector2.one; backRect.offsetMin = backRect.offsetMax = Vector2.zero;
+            back.GetComponent<Image>().color = new Color(.22f, .38f, .28f);
+            for (int i = 0; i < sprites.Length; i++)
+                for (int side = 0; side < 2; side++)
+                {
+                    var icon = new GameObject("Picture", typeof(RectTransform), typeof(Image)); icon.transform.SetParent(root.transform, false);
+                    var image = icon.GetComponent<Image>(); image.sprite = sprites[i]; image.color = i == 3 ? new Color(.45f, .8f, 1) : new Color(1, .86f, .3f);
+                    var r = image.rectTransform; r.anchorMin = r.anchorMax = new Vector2(.14f + i * .24f + (side == 0 ? -.06f : .06f), .5f);
+                    r.sizeDelta = new Vector2(160, 160); r.localScale = new Vector3(side == 0 ? -1 : 1, 1, 1);
+                }
+            yield return Shot("motion-hand-icons.png");
+            Object.Destroy(root);
+        }
+        [UnityTearDown] public IEnumerator Clean() { MotionSensor.AllowCamera = true; if (menu != null) Object.Destroy(menu.gameObject); if (events != null) Object.Destroy(events); yield return null; }
     }
 }

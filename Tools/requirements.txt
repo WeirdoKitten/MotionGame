@@ -1,0 +1,6 @@
+# Python tools for converting a senam video (Video-To-Pose.py, Pose-To-Senam.py, Senam-Check.py)
+numpy
+opencv-python
+onnxruntime
+# Optional: re-encodes the check video to H.264 with the original music
+imageio-ffmpeg

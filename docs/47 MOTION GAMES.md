@@ -26,6 +26,13 @@ Spesifikasi sumber: `docs/motion/` (GDD Star Catch, Follow the Line, Avoid the R
   (2,6 dtk); gelombang awal 1 batu, lalu 2 batu (selalu ada 1 jalur aman). Jalur berbahaya merah,
   aman hijau. Beda jalur saat batu tiba = +1, sama = "Awas!".
 
+## Catch the Star: target gambar tangan dan kaki (update)
+
+- Target bukan lagi bintang, tetapi gambar tangan (terbuka, mengepal, menyamping) atau telapak kaki (`LimbIcons`, digambar lewat kode sampai ada aset final). Gambar dicerminkan seperti kamera: target di kanan untuk tangan kanan, dengan jempol mengarah ke badan. Tangan dimiringkan menjauhi bahu.
+- Warna mengikuti penanda pose: tangan kuning, kaki biru. Gambar transparan saat menunggu dan menyala saat tangan atau kaki mendekat. Saat tertangkap, gambar pecah menjadi bintang yang terbang ke penghitung bintang.
+- Dengan model pose, target tangan hanya bisa ditangkap tangan dan target kaki hanya kaki (`MotionSensor.LimbEnergy`); sisi kiri/kanan tidak diwajibkan. Tanpa model pose tetap memakai gerak kamera.
+- Bentuk tangan baru berupa petunjuk ("Kepalkan tangan!"). Model pose belum melihat jari, jadi yang dicek hanya posisi. Lihat docs/51.
+
 ## Aset
 - `Tools/Slice-Motion-Games.py`: dari `Art/MotionGamesSource/*-sheet.png` → `Resources/Motion/`
   (bg-star, bg-line, bg-rock, star, rock).

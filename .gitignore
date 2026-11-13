@@ -21,3 +21,7 @@ Thumbs.db
 .idea/
 .vscode/
 .vs/
+
+# Python caches and research videos (keep source videos out of git)
+__pycache__/
+*.mp4
