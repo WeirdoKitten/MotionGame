@@ -26,5 +26,13 @@ Asset reference sheets for the 3 Motion Games.
 - Day/night environment and modular props
 - Reference gameplay screens
 
+## Game 04 — Jump And Duck
+- Obstacle variants: low obstacle (logs/water flow) for jumping, high obstacle (hanging branch/bees) for ducking/squatting
+- Lower-body kinematics tracking: Hip center, knee flexion angle, and ankle clearance
+- Jitter reduction via adaptive filtering (One Euro Filter)
+- Action recognition via Finite State Machine (FSM)
+- Calibration & baseline posture capture (~1.5 m)
+- UI and reference gameplay screens
+
 ## Important
 These are visual asset/concept reference sheets. Runtime Unity assets (individual PNG sprites, 3D prefabs, materials, VFX graphs, audio files, etc.) still need to be exported/created from these references according to the corresponding GDD/Mechanics MD files.

@@ -56,7 +56,7 @@ namespace FamilyAdventure.PlayTests
 
             menu = MotionMissionMenu.Open(null);
             yield return null; yield return Shot("motion-missions.png");
-            Assert.That(menu.GetComponentsInChildren<UnityEngine.UI.Button>().Count(b => b.name.StartsWith("Mission ")), Is.EqualTo(3));
+            Assert.That(menu.GetComponentsInChildren<UnityEngine.UI.Button>().Count(b => b.name.StartsWith("Mission ")), Is.EqualTo(4));
 
             // 1. Catch the Star: moving on the star catches it.
             menu.Play(0); var star = (StarCatchGame)menu.Current;
@@ -115,6 +115,106 @@ namespace FamilyAdventure.PlayTests
             Assert.That(menu.Current, Is.Null);
             menu.Close(); yield return null;
         }
+        // 4. Jump and Duck: jumping clears logs, ducking clears hanging rocks; standing still or the wrong move
+        // is only a miss. Moves are simulated (keys/clicks path), since the test runs without a camera.
+        [UnityTest] public IEnumerator JumpDuckGame_RespondsToJumpAndDuck()
+        {
+            LogAssert.ignoreFailingMessages = true; MotionSensor.AllowCamera = false;
+            events = new GameObject("Events", typeof(EventSystem));
+            menu = MotionMissionMenu.Open(null); yield return null;
+            menu.Play(3); var game = (JumpDuckGame)menu.Current;
+            yield return Started(game);
+            Assert.That(game.Sensor.Ignore, Is.EqualTo(default(Rect)), "Whole body counts");
+
+            // Standing still while the first log (always low) rolls in: a miss, not a game over.
+            Assert.That(game.NextObstacle, Is.EqualTo(-1));
+            for (float t = 0; t < 6 && game.NextObstacle < 0; t += Time.unscaledDeltaTime) yield return null;
+            Assert.That(game.NextObstacle, Is.EqualTo(0), "Wave 1 is a low obstacle");
+            for (float t = 0; t < 6 && game.Misses == 0; t += Time.unscaledDeltaTime) yield return null;
+            Assert.That(game.Misses, Is.EqualTo(1)); Assert.That(game.Score, Is.Zero); Assert.That(game.State, Is.EqualTo(MotionGame.Phase.Play));
+
+            // The right move just before each obstacle arrives clears it: duck under the rock, jump over the log.
+            int lows = 0, highs = 0, acted = -1; bool shot = false;
+            for (float t = 0; t < 15 && (lows == 0 || highs == 0 || game.Cleared < 3); t += Time.unscaledDeltaTime)
+            {
+                int kind = game.NextObstacle, cleared = game.Cleared;
+                if (!shot && kind == 1 && game.NextArrival < 1) { shot = true; yield return Shot("motion-jump.png"); }
+                if (kind >= 0 && game.NextArrival < .15f && acted != cleared + game.Misses)
+                {
+                    acted = cleared + game.Misses;
+                    if (kind == 0) game.SimulateJump(); else game.SimulateDuck();
+                }
+                yield return null;
+                if (game.Cleared > cleared) { if (kind == 0) lows++; else highs++; }
+            }
+            Assert.That(game.Misses, Is.EqualTo(1)); Assert.That(lows, Is.GreaterThan(0)); Assert.That(highs, Is.GreaterThan(0));
+            Assert.That(game.Score, Is.EqualTo(game.Cleared));
+
+            // The wrong move is a miss: jumping at everything clears logs but not a hanging rock.
+            int missedKind = -1; acted = -1;
+            for (float t = 0; t < 10 && game.Misses == 1; t += Time.unscaledDeltaTime)
+            {
+                int kind = game.NextObstacle, key = game.Cleared + game.Misses;
+                if (kind >= 0 && game.NextArrival < .15f && acted != key) { acted = key; game.SimulateJump(); }
+                yield return null;
+                if (game.Misses > 1) missedKind = kind;
+            }
+            Assert.That(game.Misses, Is.EqualTo(2)); Assert.That(missedKind, Is.EqualTo(1), "Jumping under a rock is the miss");
+            game.EndNow(); yield return null;
+            Assert.That(game.State, Is.EqualTo(MotionGame.Phase.Done));
+            game.Quit(); yield return null;
+            Assert.That(menu.Current, Is.Null);
+        }
+
+        // Kinematics without the game: jitter, the pre-jump dip and tiptoes are not moves; a jump with the feet
+        // off the floor and a held squat are.
+        [Test] public void JumpDuckBody_RecognisesJumpAndDuck()
+        {
+            var body = new JumpDuckBody(); body.Calibrate(.5f, .18f);
+            Assert.That(body.Length, Is.EqualTo(.32f).Within(1e-5f));
+            float time = 0;
+            var seen = new System.Collections.Generic.List<JumpDuckState>();
+            void Feed(float seconds, float rise, float knee, float lift, float jitter = 0)
+            {
+                for (float e = 0; e < seconds; e += 1 / 30f)
+                {
+                    time += 1 / 30f;
+                    seen.Add(body.Step(body.Baseline + rise * body.Length + jitter * Mathf.Sin(time * 47), knee, body.Floor + lift * body.Length, time));
+                }
+            }
+            // Standing with landmark jitter (about 2 px): nothing happens.
+            Feed(1, 0, 175, 0, .0025f);
+            Assert.That(seen, Is.All.EqualTo(JumpDuckState.Standing)); Assert.That(Mathf.Abs(body.Rise), Is.LessThan(.05f));
+            // Rising onto tiptoes (hips up, ankles on the floor) is not a jump.
+            seen.Clear(); Feed(.5f, .15f, 178, 0); Feed(.5f, 0, 175, 0);
+            Assert.That(seen, Has.No.Member(JumpDuckState.Airborne));
+            // Pre-jump dip (.2 s squat), then the jump: airborne, never ducking; then landing and standing.
+            seen.Clear(); Feed(.2f, -.25f, 120, 0); Feed(.35f, .3f, 175, .3f);
+            Assert.That(seen, Has.No.Member(JumpDuckState.Ducking)); Assert.That(body.State, Is.EqualTo(JumpDuckState.Airborne)); Assert.That(body.Up, Is.True);
+            Feed(.6f, 0, 175, 0);
+            Assert.That(seen, Has.Member(JumpDuckState.Landing)); Assert.That(body.State, Is.EqualTo(JumpDuckState.Standing));
+            // A held squat becomes a duck only after it is held; standing up recovers.
+            seen.Clear(); Feed(.25f, -.3f, 105, 0);
+            Assert.That(seen, Has.No.Member(JumpDuckState.Ducking));
+            Feed(.6f, -.3f, 105, 0);
+            Assert.That(body.State, Is.EqualTo(JumpDuckState.Ducking)); Assert.That(body.Down, Is.True);
+            Feed(.8f, 0, 175, 0);
+            Assert.That(seen, Has.Member(JumpDuckState.Recovered)); Assert.That(body.State, Is.EqualTo(JumpDuckState.Standing));
+            // Hips down with straight knees (bending over) is not a squat.
+            seen.Clear(); Feed(.8f, -.3f, 170, 0);
+            Assert.That(seen, Has.No.Member(JumpDuckState.Ducking));
+        }
+
+        [Test] public void OneEuroFilter_SmoothsStillAndFollowsFast()
+        {
+            var filter = new OneEuroFilter(1, .007f, 1);
+            float t = 0, value = 0;
+            for (int i = 0; i < 60; i++) { t += 1 / 30f; value = filter.Filter(450 + (i % 2 == 0 ? 2 : -2), t); }
+            Assert.That(Mathf.Abs(value - 450), Is.LessThan(1), "Jitter of 2 px is damped");
+            for (int i = 0; i < 5; i++) { t += 1 / 30f; value = filter.Filter(550, t); }
+            Assert.That(value, Is.GreaterThan(530), "A fast 100 px move is followed within 5 frames");
+        }
+
         [UnityTearDown] public IEnumerator Clean() { MotionSensor.AllowCamera = true; if (menu != null) Object.Destroy(menu.gameObject); Object.Destroy(events); yield return null; }
     }
 }

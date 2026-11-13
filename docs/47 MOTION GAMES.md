@@ -1,6 +1,6 @@
 # 47 — Motion games (Misi Gerak)
 
-Spesifikasi sumber: `docs/motion/` (GDD Star Catch, Follow the Line, Avoid the Rock).
+Spesifikasi sumber: `docs/motion/` (GDD Star Catch, Follow the Line, Avoid the Rock, Jump and Duck).
 
 ## Alur
 - Menu utama: ketuk **rumah telur** di latar → panel **Misi Gerak** dengan 3 kartu:
@@ -61,3 +61,35 @@ Spesifikasi sumber: `docs/motion/` (GDD Star Catch, Follow the Line, Avoid the R
   (~8 ms/frame) tetapi pada pose terbalik titik-titiknya bertumpuk dengan skor rendah dan tangan tidak terdeteksi.
   Rekomendasi: **BlazePose** sebagai bawaan; MoveNet untuk perangkat lemah. Perlu diuji dengan anak berdiri di depan
   webcam sungguhan.
+
+## Jump and Duck (game 4)
+
+Spesifikasi: `docs/motion/FamilyAdventure_MotionGame04_JumpAndDuck_GDD_Mechanics_Unity3D.md`. Kode: `JumpDuckGame.cs`
+(`JumpDuckBody` = kinematika + state machine, `JumpDuckGame` = rintangan dan skor), `OneEuroFilter.cs`.
+
+- **Landmark:** `PoseResult.legs` kini berisi pinggul, lutut, dan mata kaki kiri/kanan (BlazePose 23-28, MoveNet 11-16).
+- **Kalibrasi:** selama 5 detik diam, rata-rata tinggi pinggul (`Y_baseline`) dan mata kaki (`Y_floor`) dicatat lewat
+  hook baru `MotionGame.Calibrating()` / `Calibrated()`; `L_ref = Y_baseline - Y_floor`. Mata kaki tidak terlihat:
+  dipakai panjang kaki tipikal `.32`. Pose baru muncul saat main: 8 sampel pertama menjadi baseline.
+- **Sinyal:** `Rise = (Y_hip - Y_baseline) / L_ref`; sudut lutut dari pinggul-lutut-mata kaki (koordinat dikoreksi
+  rasio kamera). One Euro Filter (fc_min 1 Hz, beta .007, d_cutoff 1 Hz) pada pinggul dan mata kaki dalam satuan
+  piksel referensi (v x 900) serta sudut lutut dalam derajat, karena beta GDD disetel untuk piksel.
+- **State machine:** Standing → Airborne (Rise > .10 dan mata kaki > lantai + .05) → Landing (Rise < .04) → Standing.
+  Standing → Ducking (Rise < -.15 dan lutut < 135° ditahan >= .3 dtk; angkatan cepat > 1,5 L/dtk membatalkan, jadi
+  ancang-ancang lompat bukan merunduk) → Recovered (Rise > -.08 dan lutut > 155°) → Standing. Lutut/mata kaki yang
+  tidak terlihat membuat syaratnya dilewati.
+- **Rintangan:** muncul di (.5, .65) ukuran .05, tiba setelah 2,4 dtk dengan ukuran .2: kayu (`log`) ke y .14, batu
+  gantung (`rock-high`, bertali) ke y .75. Gelombang 1-3: bawah, atas, bawah; lalu acak, tidak pernah 3 sama berturut.
+  Jeda 2,5 → 1,8 dtk sepanjang ronde. Pad lantai berkedip merah / pad atas kuning saat rintangan mendekat;
+  cue "Lompat!" / "Merunduk!" di tengah jalan.
+- **Penilaian:** dari .35 dtk sebelum sampai .25 dtk sesudah tiba (agar anak yang sedikit cepat/lambat tetap
+  berhasil). Bawah: Airborne atau Rise > .10. Atas: Ducking atau Rise < -.12. Berhasil = +1, ledakan bintang,
+  "Hebat!"/"Keren!". Meleset = "Lompat lebih tinggi!"/"Awas kepalanya!", tanpa pengurangan skor.
+- **Cadangan:** panah atas/spasi = lompat (pinggul naik .4 dtk), panah bawah/Ctrl ditahan = merunduk, klik bagian atas
+  layar = merunduk, bagian bawah = lompat. Kamera tanpa pose: gerak di atas kepala = lompat, gerak hanya di area
+  kepala selama .15 dtk = merunduk (perkiraan kasar).
+- **Aset:** belum ada sheet konsep sendiri; `bg-jump` (jalur malam), `log`, dan `rock-high` dipotong dari sheet
+  Avoid the Rock (`Tools/Slice-Motion-Games.py`).
+- **Tes:** `JumpDuckBody_RecognisesJumpAndDuck` (jitter, jinjit, ancang-ancang, squat ditahan, membungkuk),
+  `OneEuroFilter_SmoothsStillAndFollowsFast`, `JumpDuckGame_RespondsToJumpAndDuck` (diam = meleset, gerak benar =
+  berhasil untuk kedua jenis, lompat di bawah batu gantung = meleset).

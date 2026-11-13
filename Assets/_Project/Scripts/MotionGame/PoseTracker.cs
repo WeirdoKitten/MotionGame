@@ -14,10 +14,14 @@ namespace FamilyAdventure.Presentation
         public const int LeftHand = 0, RightHand = 1, LeftFoot = 2, RightFoot = 3;
         public readonly Vector2[] limbs = new Vector2[4];
         public readonly bool[] seen = new bool[4];
+        // Leg joints for Jump and Duck: left/right hip, knee and ankle (same space as limbs).
+        public const int LeftHip = 0, RightHip = 1, LeftKnee = 2, RightKnee = 3, LeftAnkle = 4, RightAnkle = 5;
+        public readonly Vector2[] legs = new Vector2[6];
+        public readonly bool[] legSeen = new bool[6];
         public Vector2 hips;
         public bool found;
         public float milliseconds;
-        public void Clear() { found = false; for (int i = 0; i < 4; i++) seen[i] = false; }
+        public void Clear() { found = false; for (int i = 0; i < 4; i++) seen[i] = false; for (int i = 0; i < 6; i++) legSeen[i] = false; }
     }
 
     // Runs a pose model (Unity Inference Engine) on a camera frame. Frames are prepared on the CPU (the
@@ -76,8 +80,9 @@ namespace FamilyAdventure.Presentation
     sealed class BlazePoseTracker : PoseTracker
     {
         const int DetectorSize = 224, LandmarkSize = 256, Anchors = 2254;
-        // Landmark indices (MediaPipe pose): index fingers, foot tips and hips.
+        // Landmark indices (MediaPipe pose): index fingers, foot tips, hips, knees and ankles.
         const int LeftIndex = 19, RightIndex = 20, LeftFootTip = 31, RightFootTip = 32, LeftHip = 23, RightHip = 24;
+        static readonly int[] Legs = { 23, 24, 25, 26, 27, 28 };
         readonly Worker detector, landmarker;
         readonly float[,] anchors = new float[Anchors, 2];
         readonly float[] detectorInput = new float[DetectorSize * DetectorSize * 3], landmarkInput = new float[LandmarkSize * LandmarkSize * 3];
@@ -129,6 +134,7 @@ namespace FamilyAdventure.Presentation
                 bool Visible(int k) => points[5 * k + 3] > .5f && points[5 * k + 4] > .5f;
                 int[] limbs = { LeftIndex, RightIndex, LeftFootTip, RightFootTip };
                 for (int i = 0; i < 4; i++) { result.limbs[i] = Point(limbs[i]); result.seen[i] = Visible(limbs[i]); }
+                for (int i = 0; i < 6; i++) { result.legs[i] = Point(Legs[i]); result.legSeen[i] = Visible(Legs[i]); }
                 result.hips = (Point(LeftHip) + Point(RightHip)) * .5f; result.found = true;
             }
             result.milliseconds = (float)clock.Elapsed.TotalMilliseconds;
@@ -139,7 +145,7 @@ namespace FamilyAdventure.Presentation
     sealed class MoveNetTracker : PoseTracker
     {
         const int Size = 192;
-        // Keypoint indices (COCO order): wrists, ankles, hips.
+        // Keypoint indices (COCO order): wrists, ankles, hips; legs = hips, knees, ankles (11..16).
         const int LeftWrist = 9, RightWrist = 10, LeftAnkle = 15, RightAnkle = 16, LeftHip = 11, RightHip = 12;
         readonly Worker worker;
         readonly bool integer;
@@ -169,6 +175,7 @@ namespace FamilyAdventure.Presentation
             bool Visible(int k) => output[k * 3 + 2] > .3f;
             int[] limbs = { LeftWrist, RightWrist, LeftAnkle, RightAnkle };
             for (int i = 0; i < 4; i++) { result.limbs[i] = Point(limbs[i]); result.seen[i] = Visible(limbs[i]); }
+            for (int i = 0; i < 6; i++) { result.legs[i] = Point(LeftHip + i); result.legSeen[i] = Visible(LeftHip + i); }
             result.found = Visible(LeftHip) || Visible(RightHip) || result.seen[0] || result.seen[1];
             result.hips = (Point(LeftHip) + Point(RightHip)) * .5f;
             result.milliseconds = (float)clock.Elapsed.TotalMilliseconds;
