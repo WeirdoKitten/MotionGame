@@ -1,6 +1,6 @@
 # Motion Game
 
-Versi ringan dari modul **Motion Game** pada game Family Adventure, dipisah untuk penelitian tugas akhir di bidang computer vision. Repository ini hanya berisi tiga permainan kamera dan pipeline deteksi geraknya; seluruh fitur lain (onboarding, buku, Companion, Sanctuary, backend, dan sebagainya) tidak disertakan agar project lebih ringan dibuka dan dijalankan.
+Versi ringan dari modul **Motion Game** pada game Family Adventure, dipisah untuk penelitian tugas akhir di bidang computer vision. Repository ini hanya berisi empat permainan kamera dan pipeline deteksi geraknya; seluruh fitur lain (onboarding, buku, Companion, Sanctuary, backend, dan sebagainya) tidak disertakan agar project lebih ringan dibuka dan dijalankan.
 
 ## Kredit
 
@@ -13,6 +13,7 @@ Motion Game berasal dari game **Family Adventure** karya [AIKABAYAN](https://git
 | Catch the Star | Menjangkau (reach) | Bintang muncul di sekitar badan; gerakkan tangan atau kaki ke bintang untuk menangkapnya. |
 | Follow the Line | Menelusuri (trace) | Bintang pemandu berjalan di sepanjang garis selama tangan atau kaki bergerak di atasnya. |
 | Avoid the Rock | Bergeser (shift) | Batu datang ke satu atau dua dari tiga jalur; geser badan ke jalur yang aman. |
+| Jump & Duck | Melompat dan merunduk | Gelondongan kayu datang di bawah (lompat), batu gantung datang setinggi kepala (merunduk). Dinilai dari pinggul, lutut, dan mata kaki hasil pose. |
 
 Setiap ronde: kalibrasi (anak berdiri di dalam garis dan diam 5 detik), hitung mundur, main 60 detik, lalu layar hasil. Tidak ada game over; meleset hanya diberi isyarat ringan.
 
@@ -26,7 +27,7 @@ Setiap ronde: kalibrasi (anak berdiri di dalam garis dan diam 5 detik), hitung m
    Bila pose terdeteksi, tangan, kaki, dan pinggul dipakai langsung; frame differencing menjadi cadangan.
 4. **Cadangan tanpa kamera** – gerakan mouse atau sentuhan dihitung sebagai gerak, sehingga game tetap bisa dicoba dan diuji.
 
-Tombol **Deteksi** di menu misi berganti antara BlazePose, MoveNet, dan gerak kamera saja, untuk membandingkan ketiganya. Waktu inferensi per frame tampil di pojok kanan bawah saat bermain.
+Tombol **Deteksi** di menu misi berganti antara BlazePose, MoveNet, dan gerak kamera saja, untuk membandingkan ketiganya (Jump & Duck paling baik dengan model pose, karena membutuhkan lutut dan mata kaki). Waktu inferensi per frame tampil di pojok kanan bawah saat bermain.
 
 ## Menjalankan
 
@@ -45,7 +46,7 @@ Pembukaan pertama memerlukan koneksi internet untuk mengunduh package Unity.
 Script ini menjalankan PlayMode test di Unity batch mode:
 
 - `MotionGameAppTests` – scene `MotionGame` membuka menu misi; kamera belum menyala sebelum misi dipilih.
-- `MotionGamesPlayTests` – ketiga permainan merespons gerak (memakai gerak buatan, tanpa kamera).
+- `MotionGamesPlayTests` – keempat permainan merespons gerak (memakai gerak buatan, tanpa kamera), serta uji kinematika Jump & Duck (`JumpDuckBody`) dan `OneEuroFilter`.
 - `PoseModelTests` – BlazePose dan MoveNet dijalankan pada foto uji; hasil waktu dan posisi ditulis ke `Builds/pose-model-comparison.md`.
 
 Hasil test ada di `Logs/playmode-results.xml`, screenshot di `Builds/Screenshots/`.
@@ -54,9 +55,10 @@ Hasil test ada di `Logs/playmode-results.xml`, screenshot di `Builds/Screenshots
 
 ```text
 Assets/_Project/
-  Scripts/MotionGame/   MotionGames (menu + 3 permainan), MotionSensor, PoseTracker,
+  Scripts/MotionGame/   MotionGames (menu + 3 permainan), JumpDuckGame (permainan 4),
+                        OneEuroFilter, MotionSensor, PoseTracker,
                         MotionGameApp (titik masuk), UiKit, IntroIcons, MobilePermissions
-  Resources/Motion/     Latar, sprite bintang/batu, model ONNX di Pose/
+  Resources/Motion/     Latar, sprite bintang/batu/kayu, model ONNX di Pose/
   Resources/Fonts|Decor Font Sniglet (OFL) dan ornamen UI
   Art/MotionGamesSource Sheet sumber sprite dan foto uji pose
   Scenes/MotionGame.unity
@@ -65,7 +67,7 @@ Assets/_Project/
 docs/
   10 MOTION GAME.md     Aturan produk Motion Game
   47 MOTION GAMES.md    Catatan implementasi
-  motion/               GDD ketiga permainan dan sheet konsep aset
+  motion/               GDD keempat permainan dan sheet konsep aset
 Tools/
   Slice-Motion-Games.py Memotong sheet sumber menjadi sprite di Resources/Motion
   Test-Project.ps1

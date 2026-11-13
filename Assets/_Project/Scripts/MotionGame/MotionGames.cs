@@ -4,13 +4,14 @@ using UnityEngine;
 using UnityEngine.UI;
 namespace FamilyAdventure.Presentation
 {
-    // Motion missions opened from the egg house on the main menu: Catch the Star, Follow the Line and
-    // Avoid the Rock. Specs: docs/motion. All three use MotionSensor (camera frame differencing); positions
-    // are normalized screen coordinates (u right, v up). No failure states: misses only get a light cue.
+    // Motion missions opened from the egg house on the main menu: Catch the Star, Follow the Line, Avoid the
+    // Rock and Jump & Duck. Specs: docs/motion. All use MotionSensor (pose model, or camera frame differencing
+    // as the fallback); positions are normalized screen coordinates (u right, v up). No failure states:
+    // misses only get a light cue.
     public sealed class MotionMissionMenu : MonoBehaviour
     {
-        public static readonly string[] Titles = { "Catch the Star", "Follow the Line", "Avoid the Rock" };
-        static readonly string[] Backgrounds = { "bg-star", "bg-line", "bg-rock" };
+        public static readonly string[] Titles = { "Catch the Star", "Follow the Line", "Avoid the Rock", "Jump & Duck" };
+        static readonly string[] Backgrounds = { "bg-star", "bg-line", "bg-rock", "bg-jump" };
         Action closed;
         RectTransform root;
         public MotionGame Current { get; private set; }
@@ -26,12 +27,15 @@ namespace FamilyAdventure.Presentation
             for (int i = 0; i < Titles.Length; i++)
             {
                 int index = i;
-                var card = UiKit.Panel("Mission " + (i + 1), root, UiKit.Paper); UiKit.Anchor(card, .06f + i * .3f, .2f, .06f + i * .3f + .27f, .74f);
+                float x0 = .045f + i * .235f;
+                var card = UiKit.Panel("Mission " + (i + 1), root, UiKit.Paper); UiKit.Anchor(card, x0, .2f, x0 + .205f, .74f);
                 var button = card.gameObject.AddComponent<Button>(); button.targetGraphic = card.GetComponent<Image>();
                 button.onClick.AddListener(() => Play(index));
                 var picture = MotionUi.Picture(card, "Picture", Backgrounds[i]); UiKit.Anchor(picture.rectTransform, 0, .3f, 1, 1, 10);
                 picture.preserveAspect = false; picture.raycastTarget = false;
-                var plate = UiKit.Rect("Title plate", card); UiKit.Skinned(plate.gameObject, i == 0 ? UiKit.Skin.Gold : i == 1 ? UiKit.Skin.Leaf : UiKit.Skin.Wood);
+                var plate = UiKit.Rect("Title plate", card);
+                if (i < 3) UiKit.Skinned(plate.gameObject, i == 0 ? UiKit.Skin.Gold : i == 1 ? UiKit.Skin.Leaf : UiKit.Skin.Wood);
+                else UiKit.Skinned(plate.gameObject, UiKit.Skin.Soft).color = new Color(.32f, .4f, .78f); // moonlit trail
                 UiKit.Anchor(plate, .06f, .05f, .94f, .26f);
                 var number = UiKit.Label(plate, Titles[i], 30, Color.white); UiKit.Anchor(number.rectTransform, 0, 0, 1, 1, 6);
                 number.alignment = TextAnchor.MiddleCenter; number.font = UiKit.Bold;
@@ -57,7 +61,13 @@ namespace FamilyAdventure.Presentation
             root.gameObject.SetActive(false);
             var host = new GameObject(Titles[index]);
             host.transform.SetParent(transform, false);
-            Current = index == 0 ? host.AddComponent<StarCatchGame>() : index == 1 ? (MotionGame)host.AddComponent<FollowLineGame>() : host.AddComponent<AvoidRockGame>();
+            Current = index switch
+            {
+                0 => host.AddComponent<StarCatchGame>(),
+                1 => host.AddComponent<FollowLineGame>(),
+                2 => host.AddComponent<AvoidRockGame>(),
+                _ => host.AddComponent<JumpDuckGame>(),
+            };
             Current.Begin(Backgrounds[index], Titles[index], () => { Current = null; root.gameObject.SetActive(true); });
         }
         public void Close() { closed?.Invoke(); Destroy(gameObject); }
@@ -203,6 +213,10 @@ namespace FamilyAdventure.Presentation
         }
         protected abstract void Setup();
         protected abstract void Tick(float dt);
+        // Every frame while the child stands in the guide (Calibration restarts at 0 when they move), and once
+        // when the still time is complete: games that need a standing baseline record it here.
+        protected virtual void Calibrating() { }
+        protected virtual void Calibrated() { }
         void Update()
         {
             if (preview != null && Sensor.Preview != null && preview.texture == null) { preview.texture = Sensor.Preview; preview.color = new Color(1, 1, 1, CameraOpacity); }
@@ -227,8 +241,10 @@ namespace FamilyAdventure.Presentation
                 }
                 else if (Sensor.Total() > StillLimit) Calibration = 0; else Calibration += dt;
                 guideFill.rectTransform.anchorMax = new Vector2(Mathf.Clamp01(Calibration / CalibrationTime), 1);
+                if (Present) Calibrating();
                 if (Calibration >= CalibrationTime)
                 {
+                    Calibrated();
                     guide.gameObject.SetActive(false); countdown.gameObject.SetActive(true); cue.text = Instruction;
                     Sensor.Ignore = HandsAndFeetOnly ? BodyZone : default;
                     State = Phase.Ready; clock = 3.5f;
